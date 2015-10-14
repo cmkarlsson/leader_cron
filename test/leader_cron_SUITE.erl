@@ -159,6 +159,7 @@ basic_fail_over(Config) ->
     % start leader_cron on all nodes
     lists:foreach(
       fun (Node) ->
+	      ok = rpc:call(Node, application, start, [locks]),
 	      {ok, _} = rpc:call(Node, leader_cron, start_link, [Nodes])
       end, Nodes),
 
@@ -171,10 +172,10 @@ basic_fail_over(Config) ->
     % ensure all nodes are candidate nodes
     SortedNodes = lists:sort(Nodes),
     Status = rpc:call(ANode, leader_cron, status, []),
-    SortedNodes = lists:sort(proplists:get_value(candidates, Status)),
+    SortedNodes = lists:sort([ node(P) || P <- proplists:get_value(candidates, Status) ++ [proplists:get_value(leader, Status)] ]),
 
     % ensure all nodes alive
-    SortedNodes = lists:sort(proplists:get_value(alive, Status)),
+    %SortedNodes = lists:sort(proplists:get_value(alive, Status)),
 
     % schedule a task
     Sched = {sleeper, 100},
@@ -184,7 +185,8 @@ basic_fail_over(Config) ->
 	rpc:call(ANode, leader_cron, task_list, []),
 
     % ensure task is alive
-    Leader = proplists:get_value(leader,
+    %Leader = proplists:get_value(leader_node,
+    Leader = proplists:get_value(leader_node,
 				 rpc:call(ANode, leader_cron, status, [])),
     true = rpc:call(Leader, erlang, is_process_alive, [TaskPid]),
 
@@ -196,21 +198,23 @@ basic_fail_over(Config) ->
     Nodes1 = [Node || Node <- Nodes, Node /= Leader],
     [BNode|_] = Nodes1,
     timer:sleep(6000),
-    NewLeader = proplists:get_value(leader,
+    %NewLeader = proplists:get_value(leader,
+    NewLeader = proplists:get_value(leader_node,
 				    rpc:call(BNode, leader_cron, status, [])),
     true = Leader /= NewLeader,
 
     % verify tasks
     [{_Name, TaskPid1, Sched, Mfa}] = rpc:call(BNode, leader_cron, task_list, []),
+    ct:pal("TP0: ~p | TP1: ~p~n", [TaskPid, TaskPid1]),
     true = TaskPid /= TaskPid1,
 
     % verify task running again
     true = rpc:call(NewLeader, erlang, is_process_alive, [TaskPid1]),
 
     % verify alive nodes
-    Status1 = rpc:call(BNode, leader_cron, status, []),
-    SortedNodes1 = lists:sort(Nodes1),
-    erlang:display(SortedNodes1),
-    SortedNodes1 = lists:sort(proplists:get_value(alive, Status1)),
+%   Status1 = rpc:call(BNode, leader_cron, status, []),
+%   SortedNodes1 = lists:sort(Nodes1),
+%   erlang:display(SortedNodes1),
+%   SortedNodes1 = lists:sort(proplists:get_value(alive, Status1)),
     ok.
 
