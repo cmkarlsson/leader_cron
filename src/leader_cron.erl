@@ -41,7 +41,8 @@
 %%%-------------------------------------------------------------------
 -module(leader_cron).
 
--behaviour(gen_leader).
+-behaviour(locks_leader).
+%-behaviour(gen_leader).
 
 %% API
 -export([start_link/1,
@@ -58,7 +59,7 @@
 -export([init/1,
          handle_cast/3,
          handle_call/4,
-         handle_info/2,
+         handle_info/3,
          handle_leader_call/4,
          handle_leader_cast/3,
          handle_DOWN/3,
@@ -102,8 +103,11 @@
       Reason :: term().
 
 start_link(Nodes) ->
-    Opts = [],
-    gen_leader:start_link(?SERVER, Nodes, Opts, ?MODULE, [], []).
+    [ net_adm:ping(N) || N <- Nodes ],
+    _Opts = [],
+    locks_leader:start_link(?SERVER, ?MODULE, [], []).
+    %locks_leader:start_link(?MODULE, []).
+%    gen_leader:start_link(?SERVER, Nodes, Opts, ?MODULE, [], []).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -116,7 +120,8 @@ start_link(Nodes) ->
       Status :: {[term()]}.
 
 status() ->
-    gen_leader:call(?SERVER, status).
+    locks_leader:info(?SERVER).
+%    gen_leader:call(?SERVER, status).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -131,7 +136,8 @@ status() ->
       Exec :: leader_cron_task:execargs().
 
 schedule_task(Schedule, Exec) ->
-    gen_leader:leader_call(?SERVER, {schedule, {undefined, Schedule, Exec}}).
+    locks_leader:leader_call(?SERVER, {schedule, {undefined, Schedule, Exec}}).
+    %gen_leader:leader_call(?SERVER, {schedule, {undefined, Schedule, Exec}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -152,7 +158,8 @@ schedule_task(Schedule, Exec) ->
 
 schedule_task(Name, Schedule, Exec) when
       is_binary(Name); is_atom(Name), Name /= undefined ->
-    gen_leader:leader_call(?SERVER, {schedule, {Name, Schedule, Exec}}).
+    %gen_leader:leader_call(?SERVER, {schedule, {Name, Schedule, Exec}}).
+    locks_leader:leader_call(?SERVER, {schedule, {Name, Schedule, Exec}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -165,7 +172,8 @@ schedule_task(Name, Schedule, Exec) when
       Reason :: term().
 
 cancel_task(Ident) ->
-    gen_leader:leader_call(?SERVER, {cancel, Ident}).
+    %gen_leader:leader_call(?SERVER, {cancel, Ident}).
+    locks_leader:leader_call(?SERVER, {cancel, Ident}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -180,7 +188,8 @@ cancel_task(Ident) ->
       TaskPid :: pid().
 
 task_status(Ident) ->
-    gen_leader:leader_call(?SERVER, {task_status, Ident}).
+    %gen_leader:leader_call(?SERVER, {task_status, Ident}).
+    locks_leader:leader_call(?SERVER, {task_status, Ident}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -192,7 +201,8 @@ task_status(Ident) ->
 -spec task_list() -> [task()].
 
 task_list() ->
-    gen_leader:leader_call(?SERVER, task_list).
+    locks_leader:leader_call(?SERVER, task_list).
+    %gen_leader:leader_call(?SERVER, task_list).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -204,7 +214,8 @@ task_list() ->
 -spec remove_done_tasks() -> ok.
 
 remove_done_tasks() ->
-    gen_leader:leader_call(?SERVER, remove_done_tasks).
+    %gen_leader:leader_call(?SERVER, remove_done_tasks).
+    locks_leader:leader_call(?SERVER, remove_done_tasks).
 
 %%%===================================================================
 %%% gen_leader callbacks
@@ -304,7 +315,9 @@ handle_leader_call(remove_done_tasks, _From, State, Election) ->
 
 %% @private
 handle_leader_cast(_Request, State, _Election) ->
-    {noreply, State}.
+    %{noreply, State}.
+    io:fwrite("handle_leader_cast~n", []),
+    {ok, State}.
 
 %% @private
 from_leader({tasks, Tasks}, State, _Election) ->
@@ -316,26 +329,35 @@ handle_DOWN(_Node, State, _Election) ->
     {ok, State}.
 
 %% @private
-handle_call(status, _From, State, Election) ->
-    Reply = [{leader, gen_leader:leader_node(Election)},
-	     {alive, gen_leader:alive(Election)},
-	     {down, gen_leader:down(Election)},
-	     {candidates, gen_leader:candidates(Election)},
-	     {workers, gen_leader:workers(Election)},
-	     {me, node()}
-	    ],
-    {reply, Reply, State};
+%handle_call(status, _From, State, _Election) ->
+%%%%Reply = [{leader, gen_leader:leader_node(Election)},
+%%%%     {alive, gen_leader:alive(Election)},
+%%%%     {down, gen_leader:down(Election)},
+%%%%     {candidates, gen_leader:candidates(Election)},
+%%%%     {workers, gen_leader:workers(Election)},
+%%%%     {me, node()}
+%%%%    ],
+%%%    Reply = locks_leader:info(?MODULE), % this causes deadlock:)
+%    {reply, Reply, State};
 handle_call(_Request, _From, State, _Election) ->
     Reply = ok,
     {reply, Reply, State}.
 
 %% @private
 handle_cast(_Msg, State, _Election) ->
-    {noreply, State}.
+    io:fwrite("handle_cast~n", []),
+    {ok, State}.
+%    {noreply, State}.
 
 %% @private
-handle_info(_Info, State) ->
-    {noreply, State}.
+%handle_info(_Info, State) ->
+%    {noreply, State}.
+
+
+handle_info(_Msg, S, _I) ->
+%    {noreply, S}.
+    io:fwrite("handle_info~n", []),
+    {ok, S}.
 
 %% @private
 terminate(_Reason, _State) ->
@@ -357,15 +379,15 @@ save_tasks(State, Tasks) ->
       Election :: term().
 
 send_tasks(Tasks, Election) ->
-    case gen_leader:alive(Election) -- [node()] of
-	[] ->
-	    ok;
-	Alive ->
-	    Election = gen_leader:broadcast({from_leader, {tasks, Tasks}},
-					    Alive,
-					    Election),
-	    ok
-    end.
+    ok = locks_leader:broadcast({tasks, Tasks}, Election).
+%   %case gen_leader:alive(Election) -- [node()] of
+%   case alive(Election) -- [node()] of
+%   [] ->
+%       ok;
+%   _Alive ->
+%       %Election = gen_leader:broadcast({from_leader, {tasks, Tasks}},
+%       ok = locks_leader:broadcast_to_candidates({tasks, Tasks}, Election)
+%   end.
 
 -spec stop_tasks(State :: #state{}) -> #state{}.
 
@@ -438,10 +460,24 @@ dying_task(TimeToLiveMillis) ->
     timer:sleep(TimeToLiveMillis),
     throw(time_to_go).
 
+ensure_started() ->
+    ensure_started(whereis(?MODULE)).
+
+ensure_started(X) when is_pid(X) ->
+    maybe_start(is_process_alive(X));
+ensure_started(_) ->
+    maybe_start(false).
+
+maybe_start(true) ->
+    ok;
+maybe_start(false) ->
+     leader_cron:start_link([node()]).
+
 all_test_() ->
     {foreach,
      fun() ->
-         leader_cron:start_link([node()]),
+         application:start(locks),
+         ensure_started(),
 	     Tasks = leader_cron:task_list(),
 	     lists:foreach(fun({_, Pid, _, _}) ->
 				   ok = leader_cron:cancel_task(Pid)
