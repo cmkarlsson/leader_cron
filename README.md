@@ -16,6 +16,19 @@ arguments to run according to a schedule. The schedule types are:
 milliseconds
 * cron - define a schedule very similar to Unix cron
 
+
+## locks_leader
+This is the locks_leader (https://github.com/uwiger/locks) version of
+leader_cron. locks_leader supposedly has a better strategy in terms of net
+splits and it also handles dynamic adding and removing of nodes.
+
+This implementation changes the API of leader_cron slightly. Especially the following:
+
+* leader_cron:status/0 
+
+the locks application must be started before using leader_cron. 
+
+
 ## Usage
 
 Startup leader_cron on each participating node (do this on all nodes):
