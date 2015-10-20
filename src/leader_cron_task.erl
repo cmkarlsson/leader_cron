@@ -138,9 +138,12 @@
 -type status() :: waiting | running | done | error.
 %% Task execution status.
 
--type execargs() :: mfargs() | funcargs().
+-type execargs() :: mfargs() | funcargs() | cbargs().
 %% Task execution type.
 
+-type cbargs() :: {{cb, Module :: atom()}, Args :: [term()]}.
+%% Callback shoudl implement init/2 -> {ok, Delay, State} and run/1 -> {ok, Delay, State}
+%%
 -type mfargs() :: {Module :: atom(), Function :: atom(), Args :: [term()]}.
 %% Function execution definition.
 
@@ -325,31 +328,40 @@ oneshot({oneshot, DateTime}, Exec, ParentPid) ->
 	    gen_server:cast(ParentPid, {error, Message})
     end.
 
-run_task({sleeper, Millis}, Exec, ParentPid) ->
+
+run_task(Schedule, {{cb, Mod}, Args}=_Exec, ParentPid) ->
+    {ok, State} = Mod:init(Args),
+    run_task(Schedule, {{cbrun, Mod}, State}, ParentPid);
+run_task({sleeper, Millis}, Exec0, ParentPid) ->
     gen_server:cast(ParentPid, {running, Millis}),
-    apply_task(Exec),
+    Exec1 = apply_task(Exec0),
     gen_server:cast(ParentPid, {waiting, Millis}),
     sleep_accounting_for_max(Millis),
-    run_task({sleeper, Millis}, Exec, ParentPid);
-run_task(Schedule, Exec, ParentPid) ->
+    run_task({sleeper, Millis}, Exec1, ParentPid);
+run_task(Schedule, Exec0, ParentPid) ->
     CurrentDateTime = calendar:universal_time(),
     NextValidDateTime = next_valid_datetime(Schedule, CurrentDateTime),
     SleepFor = time_to_wait_millis(CurrentDateTime, NextValidDateTime),
     gen_server:cast(ParentPid, {waiting, NextValidDateTime}),
     sleep_accounting_for_max(SleepFor),
     gen_server:cast(ParentPid, {running, NextValidDateTime}),
-    apply_task(Exec),
-    run_task(Schedule, Exec, ParentPid).
+    Exec1 = apply_task(Exec0),
+    run_task(Schedule, Exec1, ParentPid).
 
 -spec apply_task(execargs()) -> any().
 
 apply_task(Exec) ->
     try
         case Exec of
+            {{cb, M}, State0} ->
+                {ok, State1} = M:run(State0),
+                {{cb, M}, State1};
             {M, F, A} ->
-                apply(M, F, A);
+                apply(M, F, A),
+                {M, F, A};
             {F, A} ->
-                apply(F, A)
+                apply(F, A),
+                {F, A}
         end
     catch
 	Error:Reason ->
